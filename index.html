@@ -43,6 +43,7 @@
   h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
   .stamp { font-size: 13px; text-align: right; }
   .stamp button { color: var(--c-link); margin-left: 6px; }
+  .stamp .old { color: var(--miss); }
   h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; margin: 0 0 10px; color: var(--c-hint); }
   .card { background: var(--c-card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -110,7 +111,7 @@ const WD = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const ICON = { '2': '✅', '1': '🟡', '0': '❌', '.': '⬜' };
 const CELL = { '2': 'm2', '1': 'm1', '0': 'm0', '.': 'mn', '-': '' };
-let D = null, N = 0, F0 = 0, range = 14, sheet = null;
+let D = null, N = 0, F0 = 0, range = 14, sheet = null, stale = false;
 
 function h(tag, props, ...kids) {
   const node = document.createElement(tag);
@@ -168,6 +169,7 @@ async function load() {
   if (!m) return null;
   let b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
   while (b64.length % 4) b64 += '=';
+  if (typeof DecompressionStream === 'undefined') throw new Error('no-inflate');  // iOS до 16.4
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   return JSON.parse(await new Response(stream).text());
@@ -218,7 +220,7 @@ function todayCard() {
     if (n >= 2 && (!best || n > best.n)) best = { n, emoji, short };
   });
   return h('section', { class: 'card' },
-    h('h2', {}, `Сегодня · ${fmtDay(today)}`),
+    h('h2', {}, `${stale ? 'Последний день в данных' : 'Сегодня'} · ${fmtDay(today)}`),
     h('div', { class: 'task' }, title),
     h('div', { class: 'chips' },
       h('span', { class: 'chip' }, 'Отмечено ', h('b', {}, `${plan.filter(isDone).length} из ${plan.length}`)),
@@ -470,8 +472,10 @@ function refresh() {
   try {
     D = await load();
   } catch (e) {
-    app.replaceChildren(h('section', { class: 'card' }, h('p', { class: 'empty' },
-      'Не получилось прочитать данные. Отправь боту /start и открой «📊 Дашборд» ещё раз.')));
+    const text = e.message === 'no-inflate'
+      ? 'Telegram открывает страницы слишком старым браузером: нужен iOS 16.4 или новее. Обнови систему или открой дашборд в Telegram на компьютере.'
+      : 'Не получилось прочитать данные. Отправь боту /start и открой «📊 Дашборд» ещё раз.';
+    app.replaceChildren(h('section', { class: 'card' }, h('p', { class: 'empty' }, text)));
     return;
   }
   if (!D) {
@@ -484,8 +488,10 @@ function refresh() {
   N = D.marks.length;
   F0 = D.first ? Math.max(0, idxOf(D.first)) : 0;
   const at = new Date(utc(D.at.slice(0, 10)));
+  stale = Date.now() - Date.parse(D.at) > 3 * 36e5;  // кнопка обновляется только вместе с ответами бота
   document.getElementById('stamp').replaceChildren(
     `данные на ${fmtDay(at)}, ${D.at.slice(11, 16)}`,
+    stale ? h('span', { class: 'old' }, ' · устарели') : null,
     h('button', { onclick: refresh, 'aria-label': 'Обновить данные' }, '↻'));
   render();
 })();
