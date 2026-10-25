@@ -73,6 +73,7 @@
   svg .target { stroke: var(--c-hint); stroke-width: 1; stroke-dasharray: 2 2; }
   svg .ok { fill: var(--ok); } svg .late { fill: var(--min); } svg .miss { fill: var(--miss); }
   svg .dot { fill: var(--c-link); }
+  svg .game { fill: #a970ff; stroke: var(--c-card); stroke-width: 1; }
   svg .wline { fill: none; stroke: var(--c-link); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   .note { font-size: 13px; margin: 10px 0 0; }
   .empty { font-size: 14px; margin: 0; }
@@ -276,26 +277,33 @@ function gridCard() {
 function sleepCard() {
   const card = h('section', { class: 'card' }, h('h2', {}, 'Сон'));
   const from = Math.max(0, N - range), g = D.goals;
+  const gameAt = i => (D.game && known(D.game[i]) ? D.game[i] : null);  // конец последней катки, минуты от полуночи дня
   const nights = [];
   for (let i = from; i < N; i++) {
     const wake = i + 1 < N ? D.wake[i + 1] : null;                   // ночь i кончается подъёмом дня i + 1
-    nights.push({ i, bed: known(D.bed[i]) ? D.bed[i] : null, wake: known(wake) ? wake + 1440 : null });
+    nights.push({ i, bed: known(D.bed[i]) ? D.bed[i] : null, wake: known(wake) ? wake + 1440 : null, game: gameAt(i),
+                  tb: g.bed[g.freeEvening.includes(wd(dayAt(i))) ? 1 : 0],
+                  tw: g.wake[g.freeMorning.includes(wd(dayAt(i + 1))) ? 1 : 0] + 1440 });
   }
-  if (!nights.some(n => n.bed !== null || n.wake !== null)) {
+  if (!nights.some(n => n.bed !== null || n.wake !== null || n.game !== null)) {
     card.append(h('p', { class: 'empty hint' }, 'Жми «😴 Спать» и «☀️ Проснулся» внизу чата — здесь появится график сна.'));
     return card;
   }
-  const X0 = 21 * 60, X1 = 36 * 60, W = 320, L = 38, rowH = 16, top = 14, H = top + nights.length * rowH + 2;
+  // Шкала под данные: от самого раннего отбоя, катки или цели до самого позднего подъёма или цели, с запасом.
+  const values = nights.flatMap(n => [n.bed, n.wake, n.game, n.tb, n.tw]).filter(v => v !== null);
+  const X0 = Math.floor((Math.min(...values) - 30) / 60) * 60;
+  const X1 = Math.max(Math.ceil((Math.max(...values) + 30) / 60) * 60, X0 + 9 * 60);
+  const step = X1 - X0 > 15 * 60 ? 180 : 120;
+  const W = 320, L = 38, rowH = 16, top = 14, H = top + nights.length * rowH + 2;
   const x = m => L + (Math.min(Math.max(m, X0), X1) - X0) / (X1 - X0) * (W - L);
   const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Отбой и подъём по ночам' });
-  for (let t = X0 + 60; t <= X1; t += 180) {
+  let drawnGames = 0;
+  for (let t = Math.ceil((X0 + 30) / step) * step; t <= X1; t += step) {
     svg.append(sv('line', { class: 'grid', x1: x(t), x2: x(t), y1: top - 3, y2: H - 2 }));
     svg.append(sv('text', { x: x(t), y: 9, 'text-anchor': 'middle' }, fmtM(t)));
   }
   nights.forEach((n, r) => {
-    const y = top + r * rowH, date = dayAt(n.i);
-    const tb = g.bed[g.freeEvening.includes(wd(date)) ? 1 : 0];
-    const tw = g.wake[g.freeMorning.includes(wd(dayAt(n.i + 1))) ? 1 : 0] + 1440;
+    const y = top + r * rowH, date = dayAt(n.i), tb = n.tb, tw = n.tw;
     svg.append(sv('text', { x: 0, y: y + rowH / 2 + 3.5 }, `${WD[wd(date)]} ${date.getUTCDate()}`));
     for (const t of [tb, tw]) svg.append(sv('line', { class: 'target', x1: x(t), x2: x(t), y1: y + 2, y2: y + rowH - 2 }));
     if (n.bed !== null && n.wake !== null) {
@@ -305,6 +313,12 @@ function sleepCard() {
     } else {
       for (const m of [n.bed, n.wake]) if (m !== null) svg.append(sv('circle', { class: 'dot', cx: x(m), cy: y + rowH / 2, r: 3.5 }));
     }
+    const gm = n.game;
+    if (gm !== null) {
+      const gx = x(gm), gy = y + rowH / 2;
+      svg.append(sv('path', { class: 'game', d: `M${gx},${gy - 5}L${gx + 5},${gy}L${gx},${gy + 5}L${gx - 5},${gy}Z` }));
+      drawnGames++;
+    }
   });
   const beds = nights.map(n => n.bed).filter(v => v !== null), wakes = nights.map(n => n.wake).filter(v => v !== null);
   const lengths = nights.filter(n => n.bed !== null && n.wake !== null).map(n => n.wake - n.bed);
@@ -312,7 +326,8 @@ function sleepCard() {
   if (beds.length) parts.push(`отбой в среднем ${fmtM(avg(beds))}`);
   if (wakes.length) parts.push(`подъём ${fmtM(avg(wakes))}`);
   if (lengths.length) { const m = Math.round(avg(lengths)); parts.push(`сон ${Math.floor(m / 60)} ч ${pad(m % 60)} мин`); }
-  card.append(svg, h('p', { class: 'note hint' }, `${parts.join(' · ')}. Пунктир — цель; жёлтый — позже цели.`));
+  const games = drawnGames ? ` ◆ — конец последней катки${D.gamesAt ? ` (матчи на ${D.gamesAt.slice(11, 16)} ${fmtDay(new Date(utc(D.gamesAt.slice(0, 10))))})` : ''}.` : '';
+  card.append(svg, h('p', { class: 'note hint' }, `${parts.join(' · ')}${parts.length ? '. ' : ''}Пунктир — цель; жёлтый — позже цели.${games}`));
   return card;
 }
 
@@ -436,6 +451,8 @@ function drawSheet() {
       h('div', { class: 'group' }, 'Сон'),
       h('div', { class: 'item' }, h('span', {}, '⏰ Встал', h('small', {}, `цель ${fmtM(tw)}`)), sheet.wakeIn),
       h('div', { class: 'item' }, h('span', {}, '😴 Лёг', h('small', {}, `вечером этого дня, цель до ${fmtM(tb)}`)), sheet.bedIn),
+      h('div', { class: 'item' }, h('span', {}, '🎮 Последняя катка', h('small', {}, 'по матчам, обновляется кнопкой ↻')),
+        h('span', { class: 'hint' }, D.game && known(D.game[sheet.i]) ? `${fmtM(D.game[sheet.i])} · ${D.gameName[sheet.i]}` : '—')),
       h('div', { class: 'group' }, 'Привычки'),
       items,
       inTg ? null : h('div', { class: 'actions' },
@@ -492,7 +509,7 @@ function refresh() {
   document.getElementById('stamp').replaceChildren(
     `данные на ${fmtDay(at)}, ${D.at.slice(11, 16)}`,
     stale ? h('span', { class: 'old' }, ' · устарели') : null,
-    h('button', { onclick: refresh, 'aria-label': 'Обновить данные' }, '↻'));
+    h('button', { onclick: refresh, 'aria-label': 'Обновить данные и матчи' }, '↻'));
   render();
 })();
 </script>
