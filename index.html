@@ -147,6 +147,7 @@ const fmtDay = date => `${WD[wd(date)]}, ${date.getUTCDate()} ${MON[date.getUTCM
 const isDone = c => c === '1' || c === '2';
 const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
 const markAt = (i, k) => (i < F0 ? '-' : D.marks[i][k]);     // до первого дня бота ничего не считаем
+const isOff = i => (D.off ? Boolean(D.off[i]) : wd(dayAt(i)) >= 5);  // нерабочий день: выходной или праздник
 const known = v => v !== null && v !== undefined;
 
 function haptic(kind) {
@@ -205,7 +206,8 @@ function render() {
 
 function todayCard() {
   const today = dayAt(N - 1);
-  const title = D.line ? `🎯 ${D.line}` : wd(today) < 5 ? '🎯 Задача дня не записана' : '🏖 Сегодня выходной';
+  const title = D.line ? `🎯 ${D.line}` : !isOff(N - 1) ? '🎯 Задача дня не записана'
+    : wd(today) < 5 ? '🏖 Сегодня праздник' : '🏖 Сегодня выходной';
   const plan = [...D.marks[N - 1]].filter(c => c !== '-');
   let weekOk = 0, weekAll = 0;
   for (let i = Math.max(F0, N - 7); i < N; i++) {
@@ -239,8 +241,9 @@ function gridCard() {
   const head = h('div', { class: 'strip days', style: cols });
   for (let i = from; i < N; i++) {
     const date = dayAt(i);
-    head.append(h('button', { class: 'cell' + (wd(date) >= 5 ? ' we' : ''), 'aria-label': `Открыть ${fmtDay(date)}`,
-                              onclick: () => openDay(i) }, date.getUTCDate()));
+    head.append(h('button', { class: 'cell' + (isOff(i) ? ' we' : ''), onclick: () => openDay(i),
+                              'aria-label': `Открыть ${fmtDay(date)}${isOff(i) && wd(date) < 5 ? ' — праздник' : ''}` },
+                  date.getUTCDate()));
   }
   const rows = D.habits.map(([, emoji, short], k) => {
     const strip = h('div', { class: 'strip', style: cols });
@@ -282,8 +285,8 @@ function sleepCard() {
   for (let i = from; i < N; i++) {
     const wake = i + 1 < N ? D.wake[i + 1] : null;                   // ночь i кончается подъёмом дня i + 1
     nights.push({ i, bed: known(D.bed[i]) ? D.bed[i] : null, wake: known(wake) ? wake + 1440 : null, game: gameAt(i),
-                  tb: g.bed[g.freeEvening.includes(wd(dayAt(i))) ? 1 : 0],
-                  tw: g.wake[g.freeMorning.includes(wd(dayAt(i + 1))) ? 1 : 0] + 1440 });
+                  tb: g.bed[isOff(i + 1) ? 1 : 0],             // завтра выходной — отбой можно позже
+                  tw: g.wake[isOff(i + 1) ? 1 : 0] + 1440 });  // и подъём тоже
   }
   if (!nights.some(n => n.bed !== null || n.wake !== null || n.game !== null)) {
     card.append(h('p', { class: 'empty hint' }, 'Жми «😴 Спать» и «☀️ Проснулся» внизу чата — здесь появится график сна.'));
@@ -430,7 +433,7 @@ function closeSheet() {
 function drawSheet() {
   document.getElementById('shade')?.remove();
   const date = dayAt(sheet.i), g = D.goals;
-  const tw = g.wake[g.freeMorning.includes(wd(date)) ? 1 : 0], tb = g.bed[g.freeEvening.includes(wd(date)) ? 1 : 0];
+  const tw = g.wake[isOff(sheet.i) ? 1 : 0], tb = g.bed[isOff(sheet.i + 1) ? 1 : 0];
   sheet.wakeIn = h('input', { type: 'time', value: known(sheet.wake) ? fmtM(sheet.wake) : null, 'aria-label': 'Во сколько встал' });
   sheet.bedIn = h('input', { type: 'time', value: known(sheet.bed) ? fmtM(sheet.bed) : null, 'aria-label': 'Во сколько лёг' });
   const items = D.habits.map(([, emoji, short, hasMin], k) => {
