@@ -74,6 +74,7 @@
   svg .ok { fill: var(--ok); } svg .late { fill: var(--min); } svg .miss { fill: var(--miss); }
   svg .dot { fill: var(--c-link); }
   svg .game { fill: #a970ff; stroke: var(--c-card); stroke-width: 1; }
+  svg .dur { fill: var(--c-text); font-weight: 600; } svg .dur.short { fill: var(--miss); }
   svg .wline { fill: none; stroke: var(--c-link); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   .note { font-size: 13px; margin: 10px 0 0; }
   .empty { font-size: 14px; margin: 0; }
@@ -146,6 +147,7 @@ const iso = date => date.toISOString().slice(0, 10);
 const fmtDay = date => `${WD[wd(date)]}, ${date.getUTCDate()} ${MON[date.getUTCMonth()]}`;
 const isDone = c => c === '1' || c === '2';
 const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
+const hours = m => (Math.round(m / 6) / 10).toFixed(1).replace('.', ',');  // минуты → «7,5» (часы с десятыми)
 const markAt = (i, k) => (i < F0 ? '-' : D.marks[i][k]);     // до первого дня бота ничего не считаем
 const isOff = i => (D.off ? Boolean(D.off[i]) : wd(dayAt(i)) >= 5);  // нерабочий день: выходной или праздник
 const known = v => v !== null && v !== undefined;
@@ -297,14 +299,15 @@ function sleepCard() {
   const X0 = Math.floor((Math.min(...values) - 30) / 60) * 60;
   const X1 = Math.max(Math.ceil((Math.max(...values) + 30) / 60) * 60, X0 + 9 * 60);
   const step = X1 - X0 > 15 * 60 ? 180 : 120;
-  const W = 320, L = 38, rowH = 16, top = 14, H = top + nights.length * rowH + 2;
-  const x = m => L + (Math.min(Math.max(m, X0), X1) - X0) / (X1 - X0) * (W - L);
+  const W = 320, L = 38, R = 34, rowH = 16, top = 14, H = top + nights.length * rowH + 2;  // R — колонка «сколько спал»
+  const x = m => L + (Math.min(Math.max(m, X0), X1) - X0) / (X1 - X0) * (W - L - R);
   const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Отбой и подъём по ночам' });
   let drawnGames = 0;
   for (let t = Math.ceil((X0 + 30) / step) * step; t <= X1; t += step) {
     svg.append(sv('line', { class: 'grid', x1: x(t), x2: x(t), y1: top - 3, y2: H - 2 }));
     svg.append(sv('text', { x: x(t), y: 9, 'text-anchor': 'middle' }, fmtM(t)));
   }
+  svg.append(sv('text', { x: W, y: 9, 'text-anchor': 'end' }, 'спал, ч'));
   nights.forEach((n, r) => {
     const y = top + r * rowH, date = dayAt(n.i), tb = n.tb, tw = n.tw;
     svg.append(sv('text', { x: 0, y: y + rowH / 2 + 3.5 }, `${WD[wd(date)]} ${date.getUTCDate()}`));
@@ -316,6 +319,9 @@ function sleepCard() {
     } else {
       for (const m of [n.bed, n.wake]) if (m !== null) svg.append(sv('circle', { class: 'dot', cx: x(m), cy: y + rowH / 2, r: 3.5 }));
     }
+    const slept = n.bed !== null && n.wake !== null ? Math.round(n.wake - n.bed) : null;  // минут сна за эту ночь
+    svg.append(sv('text', { class: slept === null ? '' : `dur${slept < 360 ? ' short' : ''}`, x: W, y: y + rowH / 2 + 3.5,
+                            'text-anchor': 'end' }, slept === null ? '—' : hours(slept)));
     const gm = n.game;
     if (gm !== null) {
       const gx = x(gm), gy = y + rowH / 2;
@@ -328,9 +334,10 @@ function sleepCard() {
   const parts = [];
   if (beds.length) parts.push(`отбой в среднем ${fmtM(avg(beds))}`);
   if (wakes.length) parts.push(`подъём ${fmtM(avg(wakes))}`);
-  if (lengths.length) { const m = Math.round(avg(lengths)); parts.push(`сон ${Math.floor(m / 60)} ч ${pad(m % 60)} мин`); }
+  if (lengths.length) parts.push(`сон ${hours(avg(lengths))} ч`);
   const games = drawnGames ? ` ◆ — конец последней катки${D.gamesAt ? ` (матчи на ${D.gamesAt.slice(11, 16)} ${fmtDay(new Date(utc(D.gamesAt.slice(0, 10))))})` : ''}.` : '';
-  card.append(svg, h('p', { class: 'note hint' }, `${parts.join(' · ')}${parts.length ? '. ' : ''}Пунктир — цель; жёлтый — позже цели.${games}`));
+  card.append(svg, h('p', { class: 'note hint' },
+    `${parts.join(' · ')}${parts.length ? '. ' : ''}Пунктир — цель; жёлтый — позже цели. Справа — сколько спал, меньше 6 ч — красным.${games}`));
   return card;
 }
 
