@@ -434,10 +434,13 @@ function drawSheet() {
   document.getElementById('shade')?.remove();
   const date = dayAt(sheet.i), g = D.goals;
   const tw = g.wake[isOff(sheet.i) ? 1 : 0], tb = g.bed[isOff(sheet.i + 1) ? 1 : 0];
+  const gk = D.habits.findIndex(([key]) => key === 'games'), gmark = gk >= 0 ? markAt(sheet.i, gk) : '-';
+  const gameText = (D.game && known(D.game[sheet.i]) ? `${fmtM(D.game[sheet.i])} · ${D.gameName[sheet.i]}`
+    : gmark === '2' ? 'каток не было' : 'нет данных') + (gmark === '2' || gmark === '0' ? ` ${ICON[gmark]}` : '');
   sheet.wakeIn = h('input', { type: 'time', value: known(sheet.wake) ? fmtM(sheet.wake) : null, 'aria-label': 'Во сколько встал' });
   sheet.bedIn = h('input', { type: 'time', value: known(sheet.bed) ? fmtM(sheet.bed) : null, 'aria-label': 'Во сколько лёг' });
-  const items = D.habits.map(([, emoji, short, hasMin], k) => {
-    if (sheet.marks[k] === '-') return null;
+  const items = D.habits.map(([, emoji, short, hasMin, auto], k) => {
+    if (auto || sheet.marks[k] === '-') return null;  // «катки» считаются по матчам — их не переключаем
     const btn = h('button', { class: 'mark', 'aria-label': `${short}: сменить отметку` }, ICON[sheet.marks[k]]);
     btn.addEventListener('click', () => {
       const order = hasMin ? ['.', '2', '1', '0'] : ['.', '2', '0'];
@@ -454,8 +457,8 @@ function drawSheet() {
       h('div', { class: 'group' }, 'Сон'),
       h('div', { class: 'item' }, h('span', {}, '⏰ Встал', h('small', {}, `цель ${fmtM(tw)}`)), sheet.wakeIn),
       h('div', { class: 'item' }, h('span', {}, '😴 Лёг', h('small', {}, `вечером этого дня, цель до ${fmtM(tb)}`)), sheet.bedIn),
-      h('div', { class: 'item' }, h('span', {}, '🎮 Последняя катка', h('small', {}, 'по матчам, обновляется кнопкой ↻')),
-        h('span', { class: 'hint' }, D.game && known(D.game[sheet.i]) ? `${fmtM(D.game[sheet.i])} · ${D.gameName[sheet.i]}` : '—')),
+      h('div', { class: 'item' }, h('span', {}, '🎮 Последняя катка', h('small', {}, 'отсюда «катки до срока»; обновляется кнопкой ↻')),
+        h('span', { class: 'hint' }, gameText)),
       h('div', { class: 'group' }, 'Привычки'),
       items,
       inTg ? null : h('div', { class: 'actions' },
